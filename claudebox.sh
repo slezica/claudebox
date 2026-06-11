@@ -33,6 +33,12 @@ slug="$(basename "${PROJECT_ROOT}" \
   | sed 's/[^a-z0-9]/-/g; s/-\{2,\}/-/g; s/^-//; s/-$//')"
 [ -n "${slug}" ] || slug="project"
 
+# Where the user's host Claude config lives. We import the *portable* bits of it
+# read-only so the sandbox feels like their Claude (see run_in_container), but
+# never settings.json, history, or credentials. Set CLAUDEBOX_NO_HOST_CONFIG=1
+# to import nothing.
+HOST_CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-${HOME}/.claude}"
+
 # Embedded Dockerfile. Read into a variable with a QUOTED heredoc delimiter so
 # the shell does not expand ${USERNAME}/$PATH/$HOME — Docker must see them raw.
 # Holding it in a var lets us both hash it and pipe it to `docker build`.
@@ -108,12 +114,28 @@ ensure_image() {
 #   -v <vol>:~/.claude       : persistent, host-independent login
 run_in_container() {
   ensure_image
+
+  # Bring the user's host config into the sandbox so it feels like their Claude
+  # — but only the portable, non-host-coupled bits, and strictly read-only so
+  # the agent can never alter the host's config. Each is mounted only if it
+  # exists (a bind mount of a missing path would create a stray empty one).
+  # Deliberately excluded: settings.json (host-coupled), projects/ history, and
+  # credentials — the sandbox keeps its own per-project login.
+  local -a host_config=()
+  if [ -z "${CLAUDEBOX_NO_HOST_CONFIG:-}" ]; then
+    [ -f "${HOST_CLAUDE_DIR}/CLAUDE.md" ] &&
+      host_config+=(-v "${HOST_CLAUDE_DIR}/CLAUDE.md:/home/claude/.claude/CLAUDE.md:ro")
+    [ -d "${HOST_CLAUDE_DIR}/agents" ] &&
+      host_config+=(-v "${HOST_CLAUDE_DIR}/agents:/home/claude/.claude/agents:ro")
+  fi
+
   docker run --rm -it \
     --user claude \
     --cap-drop ALL \
     --security-opt no-new-privileges \
     --hostname claudebox \
     -v "${CREDS_VOLUME}:/home/claude/.claude" \
+    ${host_config[@]+"${host_config[@]}"} \
     -v "${PROJECT_ROOT}:/workspace" \
     -w /workspace \
     "${IMAGE}" "$@"

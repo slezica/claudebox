@@ -53,6 +53,24 @@ with `CLAUDEBOX_IMAGE` / `CLAUDEBOX_VOLUME`.
 ./claudebox.sh logout    # forget this project's session (deletes the volume)
 ```
 
+## It still feels like your Claude
+
+The sandbox should change *what Claude can do*, not *who Claude is*. So claudebox
+brings in the **portable** parts of your host config, **read-only**:
+
+- **`~/.claude/CLAUDE.md`** — your global instructions.
+- **`~/.claude/agents/`** — your custom subagents.
+
+Read-only means the agent can read your config but can never alter it. Set
+`CLAUDE_CONFIG_DIR` if your host config lives elsewhere, or
+`CLAUDEBOX_NO_HOST_CONFIG=1` to import nothing.
+
+Deliberately **left out**: `settings.json` (mostly host-coupled — statusline
+shell commands, plugins, permissions that don't apply in the sandbox; let
+sandbox-Claude configure its own, which persists in the volume), your
+`projects/` history, and your credentials (the sandbox keeps its own per-project
+login). The result is your Claude's *judgment* without your host's *baggage*.
+
 ## Usage
 
 ```bash
