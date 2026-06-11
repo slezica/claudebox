@@ -68,13 +68,19 @@ WORKDIR /home/${USERNAME}
 RUN curl -fsSL https://claude.ai/install.sh | bash
 ENV PATH="/home/${USERNAME}/.local/bin:${PATH}"
 
+# Keep ALL of Claude's state inside ~/.claude — config, credentials, sessions,
+# and the main state file. By default that file is ~/.claude.json in $HOME,
+# OUTSIDE the mounted volume, so login and config would reset on every run.
+# Pinning the config dir into ~/.claude keeps everything on the volume.
+ENV CLAUDE_CONFIG_DIR="/home/${USERNAME}/.claude"
+
 # Trust the bind-mounted repo. Without this, on hosts where the mount keeps its
 # host UID (e.g. native Linux), git aborts with "dubious ownership" because the
 # repo owner != the container user. Safe here: a disposable single-user sandbox.
 RUN git config --global --add safe.directory /workspace
 
-# Credentials + history live here; the script mounts a persistent named volume
-# over it so the sandbox login survives runs and stays separate from the host.
+# The config dir (and thus the persistent volume mounted over it) holds the
+# login, config, and session history — so they survive across runs.
 RUN mkdir -p /home/${USERNAME}/.claude
 
 WORKDIR /workspace
