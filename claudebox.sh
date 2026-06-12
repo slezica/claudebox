@@ -3,17 +3,22 @@
 # claudebox — run Claude Code in a persistent Docker sandbox with full autonomy.
 #
 # A single self-contained script. Keep it anywhere (even on your PATH); it
-# operates on your CURRENT DIRECTORY, so run it from your project root:
+# operates on your CURRENT DIRECTORY, so run it from your project root.
 #
-#   claudebox.sh                 Launch Claude on the current dir (auto-permissions)
-#   claudebox.sh login           One-time login; persists in the sandbox
-#   claudebox.sh build           Force-(re)build the sandbox image
-#   claudebox.sh shell           Drop into a bash shell inside the sandbox
-#   claudebox.sh stop            Stop the sandbox (state preserved; frees RAM)
-#   claudebox.sh reset           Delete the sandbox container (clean slate)
-#   claudebox.sh logout          Reset the sandbox and forget the login
-#   claudebox.sh clean           Remove stale image versions
-#   claudebox.sh <prompt...>     Run Claude with a one-shot prompt
+# claudebox is a transparent wrapper: anything you pass goes straight to Claude
+# Code (so `claudebox -p "…"`, `claudebox config ls`, etc. all work). The only
+# parked token is `container`, which manages the sandbox itself:
+#
+#   claudebox.sh [claude args…]      Run Claude Code on the current directory
+#   claudebox.sh container build     (Re)build the sandbox image
+#   claudebox.sh container shell     Drop into a bash shell inside the sandbox
+#   claudebox.sh container stop      Stop the sandbox (state preserved; frees RAM)
+#   claudebox.sh container reset     Delete the sandbox container (login is kept)
+#   claudebox.sh container clean     Remove stale image versions
+#   claudebox.sh --help              Show this help, then Claude Code's
+#
+# Auth is Claude Code's own: first run signs you in; `/logout` inside a session
+# clears the credential (it persists in the sandbox volume).
 #
 # The sandbox is a long-lived container, one per project. Claude runs as a
 # non-root user but has passwordless sudo, so it can install whatever it needs
@@ -168,64 +173,95 @@ exec_in_container() {
   docker exec -it -u claude -w /workspace "${CONTAINER}" "$@"
 }
 
-cmd="${1:-run}"
-case "${cmd}" in
-  build)
-    build_image
+claudebox_help() {
+  cat <<'EOF'
+claudebox — run Claude Code in a persistent, auto-approved Docker sandbox.
+
+Usage:
+  claudebox [claude args…]     Run Claude Code on the current directory.
+                               Everything is forwarded to claude, so its own
+                               flags and subcommands work (-p, config, mcp, …).
+
+  claudebox container <cmd>    Manage the sandbox itself:
+    build    (re)build the image
+    shell    open a bash shell inside the sandbox
+    stop     stop the sandbox (state preserved, frees RAM)
+    reset    delete the sandbox for a clean slate (your login is kept)
+    clean    remove stale image versions
+
+Auth is Claude Code's own: first run signs you in; /logout inside a session
+clears the credential (it persists in the sandbox volume).
+
+Environment:
+  CLAUDE_CONFIG_DIR            host Claude config dir (default ~/.claude)
+  CLAUDEBOX_NO_HOST_CONFIG=1   don't import host CLAUDE.md / agents/
+  CLAUDEBOX_IMAGE / CLAUDEBOX_VOLUME / CLAUDEBOX_CONTAINER
+                               override generated resource names
+EOF
+}
+
+# `claudebox --help` shows our help, then Claude Code's. Claude's help lives
+# inside the image, so only append it if the image is already built — never
+# build just to render help.
+print_help() {
+  echo "── claudebox ───────────────────────────────────────────────"
+  claudebox_help
+  echo
+  echo "── Claude Code (claude --help) ─────────────────────────────"
+  if docker image inspect "${IMAGE}" >/dev/null 2>&1; then
+    docker run --rm --user claude "${IMAGE}" claude --help 2>&1 || true
+  else
+    echo "Claude's flags pass straight through; they'll appear here once the"
+    echo "sandbox image is built (run claudebox once, then --help again)."
+  fi
+}
+
+container_cmd() {
+  case "${1:-}" in
+    build) build_image ;;
+    shell) exec_in_container bash ;;
+    stop)
+      if docker stop "${CONTAINER}" >/dev/null 2>&1; then
+        echo "✓ Sandbox stopped (state preserved). Next run restarts it."
+      else
+        echo "No running sandbox to stop."
+      fi
+      ;;
+    reset)
+      if docker rm -f "${CONTAINER}" >/dev/null 2>&1; then
+        echo "✓ Sandbox '${CONTAINER}' removed; next run rebuilds it clean."
+      else
+        echo "No sandbox container to remove."
+      fi
+      ;;
+    clean)
+      # Hashing the Dockerfile leaves one image tag per recipe version. Drop
+      # every claudebox image except the current one. Images still backing a
+      # sandbox container are in use and are skipped (reset it first to free it).
+      removed=0
+      for tag in $(docker image ls --format '{{.Repository}}:{{.Tag}}' \
+                     | grep '^claudebox:' || true); do
+        [ "${tag}" = "${IMAGE}" ] && continue
+        docker image rm "${tag}" >/dev/null 2>&1 && removed=$((removed + 1)) || true
+      done
+      echo "✓ Removed ${removed} stale image(s); kept '${IMAGE}'."
+      ;;
+    ""|help|-h|--help) claudebox_help ;;
+    *) echo "Unknown: container ${1}" >&2; echo; claudebox_help; exit 1 ;;
+  esac
+}
+
+case "${1:-}" in
+  -h|--help)
+    print_help
     ;;
-  login)
-    # First launch with no credential triggers the OAuth device flow. Approve
-    # the printed URL; the token is saved to the volume and reused after.
-    echo "→ Logging in the sandbox for '${slug}' (separate from your host)."
-    exec_in_container claude
-    ;;
-  shell)
-    exec_in_container bash
-    ;;
-  stop)
-    if docker stop "${CONTAINER}" >/dev/null 2>&1; then
-      echo "✓ Sandbox stopped (state preserved). Next run restarts it."
-    else
-      echo "No running sandbox to stop."
-    fi
-    ;;
-  reset)
-    if docker rm -f "${CONTAINER}" >/dev/null 2>&1; then
-      echo "✓ Sandbox '${CONTAINER}' removed; next run rebuilds it clean."
-    else
-      echo "No sandbox container to remove."
-    fi
-    ;;
-  logout)
-    # The login lives in the volume, which the container holds open — so remove
-    # the container first, then the volume.
-    docker rm -f "${CONTAINER}" >/dev/null 2>&1 || true
-    if docker volume rm "${CREDS_VOLUME}" >/dev/null 2>&1; then
-      echo "✓ Logged out and sandbox removed."
-    else
-      echo "Sandbox removed; no login volume to forget."
-    fi
-    ;;
-  clean)
-    # Hashing the Dockerfile leaves one image tag per recipe version. Drop every
-    # claudebox image except the current one. Images still backing a sandbox
-    # container are in use and are skipped (reset that sandbox first to free it).
-    removed=0
-    for tag in $(docker image ls --format '{{.Repository}}:{{.Tag}}' \
-                   | grep '^claudebox:' || true); do
-      [ "${tag}" = "${IMAGE}" ] && continue
-      docker image rm "${tag}" >/dev/null 2>&1 && removed=$((removed + 1)) || true
-    done
-    echo "✓ Removed ${removed} stale image(s); kept '${IMAGE}'."
-    ;;
-  run)
-    shift || true
-    # --dangerously-skip-permissions: auto-approve everything. Safe because the
-    # container bounds the blast radius, not a prompt.
-    exec_in_container claude --dangerously-skip-permissions "$@"
+  container)
+    shift
+    container_cmd "$@"
     ;;
   *)
-    # Anything else is treated as a one-shot prompt for Claude.
+    # Everything else (including no args) is Claude Code, auto-approved: the
+    # container bounds the blast radius, so we skip the per-action prompts.
     exec_in_container claude --dangerously-skip-permissions "$@"
     ;;
 esac

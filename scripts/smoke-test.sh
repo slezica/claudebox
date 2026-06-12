@@ -8,7 +8,8 @@
 #   - host config is overlaid read-only, and settings.json is NOT imported
 #   - sudo can write system paths, and writes survive a stop/start
 #   - Claude state (.claude.json) lands in the persistent ~/.claude volume
-#   - reset removes the box
+#   - container reset removes the box
+#   - --help shows both claudebox's and Claude Code's help
 #
 # It works entirely in a temp directory with its own throwaway container/volume,
 # so it never touches your real sandboxes. Requires Docker.
@@ -40,7 +41,8 @@ export CLAUDE_CONFIG_DIR="${HOSTCFG}"   # claudebox reads the host config from h
 
 cleanup() {
   trap - EXIT INT TERM   # disarm so a signal mid-cleanup can't re-enter
-  ( cd "${WORK}" 2>/dev/null && "${CLAUDEBOX}" logout >/dev/null 2>&1 )
+  ( cd "${WORK}" 2>/dev/null && "${CLAUDEBOX}" container reset >/dev/null 2>&1 )
+  docker volume rm $(docker volume ls -q --filter name=claudebox-claudebox-smoke) >/dev/null 2>&1 || true
   rm -rf "$(dirname "${WORK}")" "${HOSTCFG}"
 }
 # EXIT covers normal/failed/error exits; INT+TERM cover Ctrl-C and kill, which
@@ -50,7 +52,7 @@ trap cleanup EXIT INT TERM
 cd "${WORK}"
 
 echo "› build + sudo"
-"${CLAUDEBOX}" build >/dev/null 2>&1
+"${CLAUDEBOX}" container build >/dev/null 2>&1
 IMG="$(docker image ls --format '{{.Repository}}:{{.Tag}}' | grep '^claudebox:' | head -1)"
 yes "image builds" test -n "${IMG}"
 eq  "passwordless sudo resolves to root" root "$(docker run --rm --user claude "${IMG}" sudo whoami 2>/dev/null)"
@@ -58,7 +60,7 @@ eq  "passwordless sudo resolves to root" root "$(docker run --rm --user claude "
 echo "› create persistent sandbox"
 # The interactive `docker exec -it` can't attach a TTY here, so this errors —
 # but ensure_container runs first and creates the box, which is what we test.
-"${CLAUDEBOX}" shell </dev/null >/dev/null 2>&1 || true
+"${CLAUDEBOX}" container shell </dev/null >/dev/null 2>&1 || true
 CONTAINER="$(docker ps -aq --filter "name=claudebox-claudebox-smoke" | head -1)"
 yes "container exists after a run (not --rm)" test -n "${CONTAINER}"
 WS="$(docker container inspect -f '{{range .Mounts}}{{if eq .Destination "/workspace"}}{{.Source}}{{end}}{{end}}' "${CONTAINER}" 2>/dev/null)"
@@ -71,7 +73,7 @@ no  "settings.json is NOT imported"       docker exec -u claude "${CONTAINER}" t
 
 echo "› sudo write + persistence across stop/start"
 docker exec -u claude "${CONTAINER}" sudo touch /opt/claudebox-marker >/dev/null 2>&1
-"${CLAUDEBOX}" stop >/dev/null 2>&1
+"${CLAUDEBOX}" container stop >/dev/null 2>&1
 docker start "${CONTAINER}" >/dev/null 2>&1
 yes "sudo-written /opt file survived stop/start" docker exec -u claude "${CONTAINER}" test -f /opt/claudebox-marker
 
@@ -80,8 +82,14 @@ docker exec -u claude "${CONTAINER}" claude config ls >/dev/null 2>&1 || true
 yes ".claude.json written into ~/.claude volume" docker exec -u claude "${CONTAINER}" test -f /home/claude/.claude/.claude.json
 
 echo "› reset"
-"${CLAUDEBOX}" reset >/dev/null 2>&1
-no "reset removed the container" docker container inspect "${CONTAINER}"
+"${CLAUDEBOX}" container reset >/dev/null 2>&1
+no "container reset removed the container" docker container inspect "${CONTAINER}"
+
+echo "› interface"
+no "unknown container subcommand errors" "${CLAUDEBOX}" container bogus
+HELP="$("${CLAUDEBOX}" --help 2>&1)"
+case "${HELP}" in *"claudebox"*)   ok "--help shows claudebox section" ;; *) bad "--help shows claudebox section" ;; esac
+case "${HELP}" in *"Claude Code"*) ok "--help shows Claude Code section" ;; *) bad "--help shows Claude Code section" ;; esac
 
 echo
 if [ "${fail}" -eq 0 ]; then
