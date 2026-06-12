@@ -39,10 +39,13 @@ printf '{"theme":"HOST-ONLY"}\n' > "${HOSTCFG}/settings.json"
 export CLAUDE_CONFIG_DIR="${HOSTCFG}"   # claudebox reads the host config from here
 
 cleanup() {
+  trap - EXIT INT TERM   # disarm so a signal mid-cleanup can't re-enter
   ( cd "${WORK}" 2>/dev/null && "${CLAUDEBOX}" logout >/dev/null 2>&1 )
   rm -rf "$(dirname "${WORK}")" "${HOSTCFG}"
 }
-trap cleanup EXIT
+# EXIT covers normal/failed/error exits; INT+TERM cover Ctrl-C and kill, which
+# EXIT alone does not reliably catch.
+trap cleanup EXIT INT TERM
 
 cd "${WORK}"
 
