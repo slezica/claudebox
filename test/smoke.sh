@@ -17,7 +17,7 @@
 # This is a SMOKE test, not a full suite: it can't drive the interactive Claude
 # or login flow (those need a real TTY), so it verifies everything around them.
 #
-#   scripts/smoke-test.sh
+#   test/smoke.sh
 
 set -uo pipefail   # not -e: we want to run every assertion and tally failures
 
