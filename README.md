@@ -38,12 +38,19 @@ claudebox.sh --help             # claudebox's help, then Claude Code's
 The one parked word is `container`, for managing the sandbox itself:
 
 ```bash
+claudebox.sh container create --port 3000 --dir ../lib   # forward ports / add dirs
 claudebox.sh container shell    # bash shell inside the box
 claudebox.sh container stop     # stop the box (state kept, frees RAM)
 claudebox.sh container reset    # delete the box for a clean slate (login kept)
 claudebox.sh container build    # rebuild the image
 claudebox.sh container clean    # remove stale image versions
 ```
+
+Ports and extra directories are fixed when the box is created, so `container
+create` recreates it — **preserving installed packages**, unless the Dockerfile
+changed (then it asks you to `reset` first). `--port` and `--dir` are repeatable,
+and each `create` replaces the previous set. `--port 8080:80` maps host→container;
+`--dir` paths are mounted and granted to Claude automatically.
 
 Signing out is Claude Code's own `/logout`, from inside a session.
 

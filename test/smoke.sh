@@ -8,6 +8,8 @@
 #   - host config is overlaid read-only, and settings.json is NOT imported
 #   - sudo can write system paths, and writes survive a stop/start
 #   - Claude state (.claude.json) lands in the persistent ~/.claude volume
+#   - container create publishes --port, mounts --dir, and keeps installs
+#   - container create refuses to recreate when the recipe changed
 #   - container reset removes the box
 #   - --help shows both claudebox's and Claude Code's help
 #
@@ -80,6 +82,24 @@ yes "sudo-written /opt file survived stop/start" docker exec -u claude "${CONTAI
 echo "› Claude state persists in the volume"
 docker exec -u claude "${CONTAINER}" claude config ls >/dev/null 2>&1 || true
 yes ".claude.json written into ~/.claude volume" docker exec -u claude "${CONTAINER}" test -f /home/claude/.claude/.claude.json
+
+echo "› container create: ports + dirs, keeping installs"
+EXTRA="$(dirname "${WORK}")/extralib"; mkdir -p "${EXTRA}"
+docker exec -u claude "${CONTAINER}" sudo touch /opt/keep-marker >/dev/null 2>&1
+"${CLAUDEBOX}" container create --port 3000 --dir "${EXTRA}" >/dev/null 2>&1
+CONTAINER="$(docker ps -aq --filter "name=claudebox-claudebox-smoke" | head -1)"   # same name, recreated
+PB="$(docker container inspect -f '{{json .HostConfig.PortBindings}}' "${CONTAINER}" 2>/dev/null)"
+case "${PB}" in *3000*) ok "port 3000 published after create" ;; *) bad "port 3000 published (got '${PB}')" ;; esac
+MNT="$(docker container inspect -f '{{range .Mounts}}{{.Destination}} {{end}}' "${CONTAINER}" 2>/dev/null)"
+case "${MNT}" in *"${EXTRA}"*) ok "extra --dir is mounted" ;; *) bad "extra --dir is mounted (got '${MNT}')" ;; esac
+yes "installs survived keep-recreate" docker exec -u claude "${CONTAINER}" test -f /opt/keep-marker
+yes "recipe image survived keep-recreate" docker image inspect "${IMG}"
+
+echo "› container create: refuses when recipe changed"
+# Spoof a different recipe hash via CLAUDEBOX_IMAGE; the box's label won't match,
+# so a keep-recreate (which would freeze the old recipe) must refuse.
+no "create refuses on recipe drift" env CLAUDEBOX_IMAGE=claudebox:faketag00000 "${CLAUDEBOX}" container create --port 9999
+docker image rm claudebox:faketag00000 >/dev/null 2>&1 || true
 
 echo "› reset"
 "${CLAUDEBOX}" container reset >/dev/null 2>&1
