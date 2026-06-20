@@ -49,8 +49,10 @@ claudebox.sh container clean    # remove stale image versions
 Ports and extra directories are fixed when the box is created, so `container
 create` recreates it — **preserving installed packages**, unless the Dockerfile
 changed (then it asks you to `reset` first). `--port` and `--dir` are repeatable,
-and each `create` replaces the previous set. `--port 8080:80` maps host→container;
-`--dir` paths are mounted and granted to Claude automatically.
+and each `create` replaces the previous set. Both take `host:container` form —
+`--port 8080:80`, `--dir ../lib:/src/lib` — and a bare value picks a sensible
+default (`--dir ../lib` mounts at `/mnt/lib`). Extra dirs are granted to Claude
+automatically; mounting over a system path like `/lib` is refused.
 
 Signing out is Claude Code's own `/logout`, from inside a session.
 

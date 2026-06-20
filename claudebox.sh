@@ -157,11 +157,11 @@ docker_create() {
     done
   fi
 
-  # Extra dirs: mounted at their own absolute path (collision-free); Claude is
-  # granted access to them via --add-dir on the run path (see run_claude).
+  # Extra dirs ("abshost:container"): mounted at the chosen container path, and
+  # granted to Claude via --add-dir on the run path (see run_claude).
   if [ -n "${dirs_csv}" ]; then
     local d; local IFS=,
-    for d in ${dirs_csv}; do extra+=(-v "${d}:${d}"); done
+    for d in ${dirs_csv}; do extra+=(-v "${d}"); done
   fi
 
   docker run -d --name "${CONTAINER}" \
@@ -175,6 +175,29 @@ docker_create() {
     -v "${PROJECT_ROOT}:/workspace" \
     -w /workspace \
     "${base}" sleep infinity >/dev/null
+}
+
+# A short info panel about the sandbox, shown on every create (incl. auto-create).
+box_info() {   # $1 = ports CSV   $2 = dirs CSV
+  local ports_csv="$1" dirs_csv="$2" ports_disp="none"
+  if [ -n "${ports_csv}" ]; then
+    local p out="" IFS=,
+    for p in ${ports_csv}; do
+      case "${p}" in *:*) : ;; *) p="${p}:${p}" ;; esac
+      out="${out}${out:+, }${p}"
+    done
+    ports_disp="${out}"
+  fi
+  printf '%-13s%s\n' "Image:"       "${IMAGE}"
+  printf '%-13s%s\n' "Container:"   "${CONTAINER}"
+  printf '%-13s%s\n' "Persistence:" "enabled"
+  printf '%-13s%s\n' "Ports:"       "${ports_disp}"
+  echo "Directories:"
+  echo "  - ${PROJECT_ROOT} -> /workspace"
+  if [ -n "${dirs_csv}" ]; then
+    local d IFS=,
+    for d in ${dirs_csv}; do echo "  - ${d%%:*} -> ${d#*:}"; done
+  fi
 }
 
 # Resolve the sandbox to a running container, creating it (config-less) on first
@@ -194,8 +217,10 @@ ensure_container() {
   else
     echo "→ Creating persistent sandbox '${CONTAINER}'"
     docker_create "${IMAGE}" "" ""
-    echo "ℹ No port forwards or extra dirs. To add them (recreates the box,"
-    echo "  keeping installs): ./claudebox.sh container create --port 3000 --dir ../lib"
+    box_info "" ""
+    echo
+    echo "Tip: expose ports or add directories with"
+    echo "  ./claudebox.sh container create --port 3000 --dir ../lib"
   fi
 }
 
@@ -207,7 +232,7 @@ run_claude() {
   local dirs_csv; dirs_csv="$(box_label claudebox.dirs)"
   if [ -n "${dirs_csv}" ]; then
     local d; local IFS=,
-    for d in ${dirs_csv}; do [ -n "${d}" ] && add+=(--add-dir "${d}"); done
+    for d in ${dirs_csv}; do [ -n "${d}" ] && add+=(--add-dir "${d#*:}"); done
   fi
   docker exec -it -u claude -w /workspace "${CONTAINER}" \
     claude --dangerously-skip-permissions ${add[@]+"${add[@]}"} "$@"
@@ -219,7 +244,7 @@ exec_in_container() {
   docker exec -it -u claude -w /workspace "${CONTAINER}" "$@"
 }
 
-# `container create [--port H[:C]]… [--dir PATH]…` — (re)create the box with the
+# `container create [--port H[:C]]… [--dir HOST[:C]]…` — (re)create the box with the
 # given runtime config (ports/mounts are fixed at creation, so changing them
 # recreates). On an existing box we DEFAULT to keeping installs by committing it
 # first — UNLESS the recipe changed, which we detect and refuse (committing would
@@ -238,15 +263,26 @@ container_create() {
     esac
   done
 
-  # Resolve --dir to absolute paths and verify they exist.
-  local -a abs=(); local d
-  for d in ${dirs[@]+"${dirs[@]}"}; do
-    [ -d "${d}" ] || { echo "container create: no such directory: ${d}" >&2; exit 1; }
-    abs+=("$(cd "${d}" && pwd)")
+  # Resolve each --dir (HOST[:CONTAINER]) into an "abshost:container" mount. A
+  # bare HOST defaults the container path to /<basename>, so the host path never
+  # leaks inside the box.
+  local -a pairs=(); local spec host cpath
+  for spec in ${dirs[@]+"${dirs[@]}"}; do
+    host="${spec%%:*}"
+    case "${spec}" in *:*) cpath="${spec#*:}" ;; *) cpath="" ;; esac
+    [ -d "${host}" ] || { echo "container create: no such directory: ${host}" >&2; exit 1; }
+    host="$(cd "${host}" && pwd)"
+    [ -n "${cpath}" ] || cpath="/mnt/$(basename "${host}")"
+    case "${cpath}" in /*) : ;; *) echo "container create: container path must be absolute: ${cpath}" >&2; exit 1 ;; esac
+    case "${cpath}" in
+      /|/bin|/sbin|/lib|/lib64|/usr|/etc|/proc|/sys|/dev|/home|/root|/boot|/var|/workspace)
+        echo "container create: refusing to mount over the system path ${cpath}" >&2; exit 1 ;;
+    esac
+    pairs+=("${host}:${cpath}")
   done
   local ports_csv dirs_csv
   ports_csv="$(join_csv ${ports[@]+"${ports[@]}"})"
-  dirs_csv="$(join_csv ${abs[@]+"${abs[@]}"})"
+  dirs_csv="$(join_csv ${pairs[@]+"${pairs[@]}"})"
 
   ensure_image
 
@@ -273,7 +309,8 @@ container_create() {
   else
     docker_create "${IMAGE}" "${ports_csv}" "${dirs_csv}"
   fi
-  echo "✓ Sandbox ready. Ports: ${ports_csv:-none}. Extra dirs: ${dirs_csv:-none}."
+  echo
+  box_info "${ports_csv}" "${dirs_csv}"
 }
 
 claudebox_help() {
@@ -286,7 +323,7 @@ Usage:
                                flags and subcommands work (-p, config, mcp, …).
 
   claudebox container <cmd>    Manage the sandbox itself:
-    create   (re)create the box with --port H[:C] and --dir PATH (repeatable);
+    create   (re)create the box with --port H[:C] and --dir HOST[:C] (repeatable);
              recreating keeps installs unless the recipe changed
     build    (re)build the image
     shell    open a bash shell inside the sandbox

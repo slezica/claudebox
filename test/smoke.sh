@@ -90,8 +90,9 @@ docker exec -u claude "${CONTAINER}" sudo touch /opt/keep-marker >/dev/null 2>&1
 CONTAINER="$(docker ps -aq --filter "name=claudebox-claudebox-smoke" | head -1)"   # same name, recreated
 PB="$(docker container inspect -f '{{json .HostConfig.PortBindings}}' "${CONTAINER}" 2>/dev/null)"
 case "${PB}" in *3000*) ok "port 3000 published after create" ;; *) bad "port 3000 published (got '${PB}')" ;; esac
-MNT="$(docker container inspect -f '{{range .Mounts}}{{.Destination}} {{end}}' "${CONTAINER}" 2>/dev/null)"
-case "${MNT}" in *"${EXTRA}"*) ok "extra --dir is mounted" ;; *) bad "extra --dir is mounted (got '${MNT}')" ;; esac
+MNT="$(docker container inspect -f '{{range .Mounts}}{{.Source}}:{{.Destination}} {{end}}' "${CONTAINER}" 2>/dev/null)"
+case "${MNT}" in *extralib:/mnt/extralib*) ok "bare --dir mounts at /mnt/<name> (no host-path leak)" ;; *) bad "bare --dir mounts at /mnt/extralib (got '${MNT}')" ;; esac
+no "create refuses mounting over a system path" "${CLAUDEBOX}" container create --dir "${EXTRA}:/lib"
 yes "installs survived keep-recreate" docker exec -u claude "${CONTAINER}" test -f /opt/keep-marker
 yes "recipe image survived keep-recreate" docker image inspect "${IMG}"
 
