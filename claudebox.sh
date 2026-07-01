@@ -82,16 +82,22 @@ RUN useradd --create-home --shell /bin/bash "${USERNAME}" \
 USER ${USERNAME}
 WORKDIR /home/${USERNAME}
 
-# Install Claude Code via the native installer (no global npm). Binary lands in
-# ~/.local/bin; config + credentials live in ~/.claude.
-RUN curl -fsSL https://claude.ai/install.sh | bash
-ENV PATH="/home/${USERNAME}/.local/bin:${PATH}"
-
 # Keep ALL of Claude's state inside ~/.claude — config, credentials, sessions,
 # and the main state file. By default that file is ~/.claude.json in $HOME,
 # OUTSIDE the mounted volume, so login and config would reset on every run.
 # Pinning the config dir into ~/.claude keeps everything on the volume.
+#
+# This MUST be set before the install below: the installer runs Claude once,
+# which writes an initial .claude.json plus a backup. With the config dir already
+# pointed here, both land together in ~/.claude and seed a self-consistent state
+# into fresh volumes. Set it afterward and only the backup lands here — first run
+# then finds a backup but no config and nags "configuration file not found".
 ENV CLAUDE_CONFIG_DIR="/home/${USERNAME}/.claude"
+
+# Install Claude Code via the native installer (no global npm). Binary lands in
+# ~/.local/bin; config + credentials live in ~/.claude.
+RUN curl -fsSL https://claude.ai/install.sh | bash
+ENV PATH="/home/${USERNAME}/.local/bin:${PATH}"
 
 # Trust the bind-mounted repo. Without this, on hosts where the mount keeps its
 # host UID (e.g. native Linux), git aborts with "dubious ownership" because the
