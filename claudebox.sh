@@ -140,7 +140,7 @@ join_csv() { local IFS=,; echo "$*"; }
 # recipe hash + ports + dirs are stamped as labels so we can later detect recipe
 # drift and re-advertise the config (see ensure_container / run_claude).
 docker_create() {
-  local base="$1" ports_csv="$2" dirs_csv="$3"
+  local base="$1" ports_csv="$2" dirs_csv="$3" name="${4:-${CONTAINER}}"
   local -a extra=()
 
   # Host config overlay: portable, read-only (global CLAUDE.md + custom agents/).
@@ -166,7 +166,7 @@ docker_create() {
     for d in ${dirs_csv}; do extra+=(-v "${d}"); done
   fi
 
-  docker run -d --name "${CONTAINER}" \
+  docker run -d --name "${name}" \
     --user claude \
     --hostname claudebox \
     --label "claudebox.recipe=${RECIPE_HASH}" \
@@ -297,11 +297,21 @@ container_create() {
       exit 1
     fi
     echo "→ Recreating sandbox, preserving installed packages…"
-    local snap="claudebox-snap:${CONTAINER}" old_img
+    local snap="claudebox-snap:${CONTAINER}" old_img tmp="${CONTAINER}-recreate"
     old_img="$(docker container inspect -f '{{.Image}}' "${CONTAINER}")"
     docker commit "${CONTAINER}" "${snap}" >/dev/null
+    # Build the replacement under a temp name FIRST, leaving the old box intact.
+    # If creation fails (e.g. a published port is already taken) we still have
+    # the original — drop the half-made temp and bail, touching nothing else.
+    docker rm -f "${tmp}" >/dev/null 2>&1 || true   # clear any stale temp
+    if ! docker_create "${snap}" "${ports_csv}" "${dirs_csv}" "${tmp}"; then
+      docker rm -f "${tmp}" >/dev/null 2>&1 || true
+      echo "✗ Recreate failed; the existing sandbox was left untouched." >&2
+      exit 1
+    fi
+    # Replacement is up: retire the old box and hand its name to the new one.
     docker rm -f "${CONTAINER}" >/dev/null
-    docker_create "${snap}" "${ports_csv}" "${dirs_csv}"
+    docker rename "${tmp}" "${CONTAINER}"
     # Committing to ${snap} re-tags it onto the new image, leaving the PRIOR
     # snapshot dangling (empty RepoTags). Drop only that — never the recipe image
     # (which keeps its claudebox:<hash> tag and must survive).
@@ -309,7 +319,11 @@ container_create() {
       docker image rm "${old_img}" >/dev/null 2>&1 || true
     fi
   else
-    docker_create "${IMAGE}" "${ports_csv}" "${dirs_csv}"
+    if ! docker_create "${IMAGE}" "${ports_csv}" "${dirs_csv}"; then
+      docker rm -f "${CONTAINER}" >/dev/null 2>&1 || true   # drop the half-made box
+      echo "✗ Sandbox creation failed." >&2
+      exit 1
+    fi
   fi
   echo
   box_info "${ports_csv}" "${dirs_csv}"
