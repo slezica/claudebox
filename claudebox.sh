@@ -2,34 +2,36 @@
 #
 # claudebox — run Claude Code in a persistent Docker sandbox with full autonomy.
 #
-# A single self-contained script. Keep it anywhere (even on your PATH); it
-# operates on your CURRENT DIRECTORY, so run it from your project root.
+# Installation:
+# Place `claudebox.sh` in your PATH (self-contained script), eg `~/bin/claudebox`
 #
-# claudebox is a transparent wrapper: anything you pass goes straight to Claude
-# Code (so `claudebox -p "…"`, `claudebox config ls`, etc. all work). The only
-# parked token is `container`, which manages the sandbox itself:
+# claudebox is a transparent wrapper, arguments pass-through to Claude Code, except
+# for the `container` subcommand.
 #
-#   claudebox.sh [claude args…]      Run Claude Code on the current directory
-#   claudebox.sh container build     (Re)build the sandbox image
-#   claudebox.sh container shell     Drop into a bash shell inside the sandbox
-#   claudebox.sh container stop      Stop the sandbox (state preserved; frees RAM)
-#   claudebox.sh container reset     Delete the sandbox container (login is kept)
-#   claudebox.sh container clean     Remove stale image versions
-#   claudebox.sh --help              Show this help, then Claude Code's
+#   claudebox.sh [claude args…]   |  Run Claude Code on the current directory
+#   claudebox.sh container build  |  (Re)build the sandbox image
+#   claudebox.sh container shell  |  Drop into a bash shell inside the sandbox
+#   claudebox.sh container stop   |  Stop the sandbox (state preserved; frees RAM)
+#   claudebox.sh container reset  |  Delete the sandbox container (login is kept)
+#   claudebox.sh container clean  |  Remove stale image versions
+#   claudebox.sh container create [--port H[:C]] [--dir HOST[:C]]
+#     (Re)create the sandbox with ports/extra dirs; preserves installed packages
 #
-# Auth is Claude Code's own: first run signs you in; `/logout` inside a session
-# clears the credential (it persists in the sandbox volume).
+# On first run, the container will be created, named for the current working directory
+# and the claudebox Dockerfile version. By default:
 #
-# The sandbox is a long-lived container, one per project. Claude runs as a
-# non-root user but has passwordless sudo, so it can install whatever it needs
-# (apt packages, language toolchains, ffmpeg, …) on demand — and because the
-# container persists between runs, those installs stick.
+# - Mounts project directory read/write at /workspace
+# - Mounts ~/.claude/CLAUDE.md read-only
+# - Mounts ~/.claude/agents read-only
+# - Creates a volume for in-sandbox login credentials
+# - Does not bind ports
 #
-# THREAT MODEL — read this. claudebox protects your HOST and your DATA from an
-# agent that errs, loops, or runs wild: only the current directory is mounted,
-# so nothing else on your machine is reachable, and no Docker socket is exposed.
-# It is NOT hardened against a deliberately malicious repository — inside the box
-# the agent has root and open network. Point it at code you trust.
+# The sandboxed agent runs with auto-permissions in a persistent environment and can 
+# install software as needed.
+#
+# SECURITY:
+# claudebox protects your host against a dumb or clumsy agent, NOT against a malicious
+# agent or repository. Use agents you trust with code you trust.
 
 set -euo pipefail
 
