@@ -2,17 +2,15 @@
 
 Run Claude Code as a fully autonomous agent inside a persistent, resettable Docker sandbox.
 
-claudebox launches Claude Code with every action auto-approved and confines it to a container, so the sandbox is the boundary instead of a permission prompt.
-
-- **Auto-approved** — runs with `--dangerously-skip-permissions`; the container is the guardrail, not prompts.
-- **Scoped to the current directory** — mounts your working dir as `/workspace`, the only host path the agent sees.
-- **Persistent per-project box** — a long-lived container per project; installed packages and toolchains survive between runs.
-- **Self-provisioning** — the agent has passwordless `sudo` and network access, so it installs whatever it needs.
+- **One file** — a self-contained script; keep it in your `PATH` or repository.
+- **Auto-permissions** — runs with `--dangerously-skip-permissions`; the container is the guardrail.
+- **Scoped to the project** — mounts your working dir as `/workspace`.
+- **Per-project container** — a long-lived container per project, with a persistent file-system.
 - **Per-project login** — its own Claude login, independent of your host, remembered across runs.
-- **Your config, read-only** — imports your `~/.claude/CLAUDE.md` and `agents/` so it behaves like your Claude, without altering them.
-- **One file** — a self-contained script; keep it on your `PATH` or in the repo.
+- **Self-provisioning** — the agent has `sudo` and network access, so it installs whatever it needs.
+- **Your config, read-only** — imports your `~/.claude/CLAUDE.md` and `~/claude/agents/`.
 
-> **Scope:** claudebox guards against a *clumsy* agent, not a *malicious* one. It keeps mistakes from escaping the container; it does not contain a deliberately hostile repository. Point it at code you trust.
+> **Security:** claudebox guards against a *clumsy* agent, not a *malicious* one. It keeps mistakes from escaping the container; it does not contain a deliberately hostile agent or repository. Use an agent you trust with code you trust.
 
 ## Installation
 
