@@ -16,9 +16,10 @@
 #   claudebox.sh container clean  |  Remove stale image versions
 #   claudebox.sh container create [--port H[:C]] [--dir HOST[:C]]
 #     (Re)create the sandbox with ports/extra dirs; preserves installed packages
+#     A bare --dir mounts at /mnt/<name>; give host:container to choose the path
 #
-# On first run, the container will be created, named for the current working directory
-# and the claudebox Dockerfile version. By default:
+# On first run, the container will be created, named for the current working
+# directory (the image itself is tagged by the Dockerfile version). By default:
 #
 # - Mounts project directory read/write at /workspace
 # - Mounts ~/.claude/CLAUDE.md read-only
@@ -272,7 +273,7 @@ container_create() {
   done
 
   # Resolve each --dir (HOST[:CONTAINER]) into an "abshost:container" mount. A
-  # bare HOST defaults the container path to /<basename>, so the host path never
+  # bare HOST defaults the container path to /mnt/<basename>, so the host path never
   # leaks inside the box.
   local -a pairs=(); local spec host cpath
   for spec in ${dirs[@]+"${dirs[@]}"}; do
